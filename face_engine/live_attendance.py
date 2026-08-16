@@ -2,24 +2,20 @@ import cv2
 import numpy as np
 import mysql.connector
 import pickle
-from mtcnn import MTCNN
 from deepface import DeepFace
+
+# =============================
+# SETTINGS
+# =============================
 
 MATCH_THRESHOLD = 0.40
 PROCESS_EVERY_N_FRAMES = 10
-LIVENESS_WINDOW = 20
-MOVEMENT_THRESHOLD = 20
-
 SESSION_ID = 1
 
-# -----------------------------
-# FACE DETECTOR
-# -----------------------------
-detector = MTCNN()
-
-# -----------------------------
+# =============================
 # MYSQL CONNECTION
-# -----------------------------
+# =============================
+
 db = mysql.connector.connect(
     host="localhost",
     user="root",
@@ -29,9 +25,10 @@ db = mysql.connector.connect(
 
 cursor = db.cursor()
 
-# -----------------------------
+# =============================
 # LOAD ENROLLED STUDENTS
-# -----------------------------
+# =============================
+
 print("Loading enrolled students from MySQL...")
 
 cursor.execute("""
@@ -54,25 +51,29 @@ for row in cursor.fetchall():
 
 print(f"Students loaded: {len(students)}")
 
+# =============================
+# GENERATE FACE EMBEDDING
+# =============================
 
-# -----------------------------
-# GENERATE EMBEDDING
-# -----------------------------
-def get_embedding(frame):
+def get_embedding(face_crop):
 
     result = DeepFace.represent(
-        img_path=frame,
+        img_path=face_crop,
         model_name="Facenet512",
-        detector_backend="mtcnn",
-        enforce_detection=True
+        detector_backend="skip",
+        enforce_detection=False
     )
 
-    return np.array(result[0]["embedding"])
+    return np.array(
+        result[0]["embedding"],
+        dtype=np.float32
+    )
 
 
-# -----------------------------
+# =============================
 # RECOGNITION
-# -----------------------------
+# =============================
+
 def recognize(embedding):
 
     best_student = None
@@ -82,7 +83,10 @@ def recognize(embedding):
 
         stored = student["embedding"]
 
-        similarity = np.dot(embedding, stored) / (
+        similarity = np.dot(
+            embedding,
+            stored
+        ) / (
             np.linalg.norm(embedding)
             * np.linalg.norm(stored)
         )
@@ -90,21 +94,26 @@ def recognize(embedding):
         distance = 1 - similarity
 
         if distance < best_distance:
+
             best_distance = distance
             best_student = student
 
-    if best_student and best_distance < MATCH_THRESHOLD:
+    if (
+        best_student is not None
+        and best_distance < MATCH_THRESHOLD
+    ):
+
         return best_student, best_distance
 
     return None, best_distance
 
 
-# -----------------------------
+# =============================
 # MARK ATTENDANCE
-# -----------------------------
+# =============================
+
 def mark_attendance(student, distance):
 
-    # Check duplicate attendance
     cursor.execute("""
         SELECT attendance_id
         FROM attendance
@@ -118,9 +127,9 @@ def mark_attendance(student, distance):
     existing = cursor.fetchone()
 
     if existing:
+
         return False
 
-    # Insert attendance
     cursor.execute("""
         INSERT INTO attendance
         (
@@ -143,7 +152,7 @@ def mark_attendance(student, distance):
         distance,
         "Present",
         "AI",
-        "Live face recognition"
+        "Anti-spoofing + FaceNet512"
     ))
 
     db.commit()
@@ -151,110 +160,180 @@ def mark_attendance(student, distance):
     return True
 
 
-# -----------------------------
-# START WEBCAM
-# -----------------------------
+# =============================
+# START CAMERA
+# =============================
+
 cap = cv2.VideoCapture(0)
 
 frame_count = 0
-positions = []
-
-status = "Scanning..."
-distance = None
 
 print()
-print("Live attendance started.")
-print("Move your head slightly.")
+print("========================================")
+print("LIVE ATTENDANCE STARTED")
+print("========================================")
+print("Anti-spoofing: ENABLED")
+print("FaceNet512 recognition: ENABLED")
+print("Multiple face detection: ENABLED")
 print("Press Q to quit.")
 print()
 
 
-# -----------------------------
+# =============================
 # MAIN LOOP
-# -----------------------------
+# =============================
+
 while True:
 
     ret, frame = cap.read()
 
     if not ret:
+        print("Camera error.")
         break
 
-    rgb = cv2.cvtColor(
-        frame,
-        cv2.COLOR_BGR2RGB
-    )
+    display_frame = frame.copy()
 
-    faces = detector.detect_faces(rgb)
+    try:
 
-    liveness = "NO FACE"
+        # ==================================
+        # DETECT ALL FACES + ANTI-SPOOF
+        # ==================================
 
-    if faces:
-
-        # Select largest face
-        face = max(
-            faces,
-            key=lambda f: f["box"][2] * f["box"][3]
+        results = DeepFace.extract_faces(
+            img_path=frame,
+            detector_backend="mtcnn",
+            enforce_detection=False,
+            align=True,
+            anti_spoofing=True
         )
 
-        x, y, w, h = face["box"]
+        face_count = len(results)
 
-        # Prevent negative coordinates
-        x = max(0, x)
-        y = max(0, y)
+        # ==================================
+        # PROCESS EVERY DETECTED FACE
+        # ==================================
 
-        # Face centre
-        center_x = x + w // 2
-        center_y = y + h // 2
+        for face_data in results:
 
-        positions.append(
-            (center_x, center_y)
-        )
+            area = face_data["facial_area"]
 
-        if len(positions) > LIVENESS_WINDOW:
-            positions.pop(0)
+            x = area["x"]
+            y = area["y"]
+            w = area["w"]
+            h = area["h"]
 
-        # -----------------------------
-        # LIVENESS
-        # -----------------------------
-        if len(positions) >= LIVENESS_WINDOW:
+            # Prevent invalid coordinates
 
-            movement = np.ptp(
-                np.array(positions),
-                axis=0
+            x = max(0, x)
+            y = max(0, y)
+
+            x2 = min(
+                frame.shape[1],
+                x + w
             )
 
-            total_movement = (
-                movement[0] + movement[1]
+            y2 = min(
+                frame.shape[0],
+                y + h
             )
 
-            if total_movement > MOVEMENT_THRESHOLD:
-                liveness = "LIVE"
-            else:
-                liveness = "MOVE HEAD"
+            if x2 <= x or y2 <= y:
+                continue
 
-        # Draw face box
-        cv2.rectangle(
-            frame,
-            (x, y),
-            (x + w, y + h),
-            (0, 255, 0),
-            2
-        )
+            # ==================================
+            # ANTI-SPOOF RESULT
+            # ==================================
 
-        # -----------------------------
-        # RECOGNITION
-        # -----------------------------
-        if (
-            frame_count % PROCESS_EVERY_N_FRAMES == 0
-            and liveness == "LIVE"
-        ):
+            is_real = face_data.get(
+                "is_real",
+                False
+            )
+
+            spoof_score = face_data.get(
+                "antispoof_score",
+                0.0
+            )
+
+            # ==================================
+            # SPOOF FACE
+            # ==================================
+
+            if not is_real:
+
+                color = (0, 0, 255)
+
+                label = (
+                    f"SPOOF | {spoof_score:.3f}"
+                )
+
+                cv2.rectangle(
+                    display_frame,
+                    (x, y),
+                    (x2, y2),
+                    color,
+                    3
+                )
+
+                cv2.putText(
+                    display_frame,
+                    label,
+                    (x, max(30, y - 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65,
+                    color,
+                    2
+                )
+
+                # IMPORTANT:
+                # DO NOT RUN FACE RECOGNITION
+                # DO NOT MARK ATTENDANCE
+
+                continue
+
+            # ==================================
+            # REAL FACE
+            # ==================================
+
+            color = (0, 255, 0)
+
+            label = (
+                f"REAL | {spoof_score:.3f}"
+            )
+
+            cv2.rectangle(
+                display_frame,
+                (x, y),
+                (x2, y2),
+                color,
+                3
+            )
+
+            cv2.putText(
+                display_frame,
+                label,
+                (x, max(30, y - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                color,
+                2
+            )
+
+            # ==================================
+            # RECOGNITION
+            # ==================================
+
+            if frame_count % PROCESS_EVERY_N_FRAMES != 0:
+                continue
 
             try:
 
                 face_crop = frame[
-                    y:y + h,
-                    x:x + w
+                    y:y2,
+                    x:x2
                 ]
+
+                if face_crop.size == 0:
+                    continue
 
                 embedding = get_embedding(
                     face_crop
@@ -264,58 +343,95 @@ while True:
                     embedding
                 )
 
+                # ==================================
+                # RECOGNIZED STUDENT
+                # ==================================
+
                 if student:
 
-                    # Mark attendance
                     marked = mark_attendance(
                         student,
                         distance
                     )
 
-                    status = (
-                        f"{student['name']} "
-                        f"({student['usn']})"
+                    name = student["name"]
+                    usn = student["usn"]
+
+                    student_label = (
+                        f"{name} | D:{distance:.3f}"
+                    )
+
+                    cv2.putText(
+                        display_frame,
+                        student_label,
+                        (x, y2 + 25),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.65,
+                        (0, 255, 0),
+                        2
                     )
 
                     if marked:
 
                         print(
                             f"ATTENDANCE MARKED: "
-                            f"{student['name']} "
-                            f"({student['usn']})"
+                            f"{name} ({usn})"
                         )
 
                     else:
 
                         print(
                             f"Already marked: "
-                            f"{student['name']} "
-                            f"({student['usn']})"
+                            f"{name} ({usn})"
                         )
+
+                # ==================================
+                # UNKNOWN REAL PERSON
+                # ==================================
 
                 else:
 
-                    status = "UNKNOWN"
+                    cv2.putText(
+                        display_frame,
+                        f"UNKNOWN | D:{distance:.3f}",
+                        (x, y2 + 25),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.65,
+                        (0, 165, 255),
+                        2
+                    )
 
             except Exception as e:
 
-                status = "Recognition failed"
-                print("Recognition error:", e)
+                print(
+                    "Recognition error:",
+                    e
+                )
 
-    else:
+                cv2.putText(
+                    display_frame,
+                    "Recognition error",
+                    (x, y2 + 25),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 0, 255),
+                    2
+                )
 
-        status = "Scanning..."
-        distance = None
-        positions.clear()
+    except Exception as e:
 
-    frame_count += 1
+        print(
+            "Detection / anti-spoof error:",
+            e
+        )
 
-    # -----------------------------
-    # DISPLAY
-    # -----------------------------
+    # ==================================
+    # DISPLAY INFORMATION
+    # ==================================
+
     cv2.putText(
-        frame,
-        f"Liveness: {liveness}",
+        display_frame,
+        f"Faces detected: {face_count}",
         (20, 35),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
@@ -324,8 +440,8 @@ while True:
     )
 
     cv2.putText(
-        frame,
-        status,
+        display_frame,
+        f"Students enrolled: {len(students)}",
         (20, 70),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
@@ -333,36 +449,44 @@ while True:
         2
     )
 
-    if distance is not None:
-
-        cv2.putText(
-            frame,
-            f"Distance: {distance:.3f}",
-            (20, 105),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2
-        )
+    cv2.putText(
+        display_frame,
+        "Anti-Spoofing: ON",
+        (20, 105),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 0),
+        2
+    )
 
     cv2.imshow(
         "Smart Attendance - Live Attendance",
-        frame
+        display_frame
     )
 
-    # Q = quit
+    frame_count += 1
+
+    # ==================================
+    # QUIT
+    # ==================================
+
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 
-# -----------------------------
+# =============================
 # CLEANUP
-# -----------------------------
+# =============================
+
 cap.release()
+
 cv2.destroyAllWindows()
 
 cursor.close()
+
 db.close()
 
 print()
-print("Live attendance stopped.")
+print("========================================")
+print("LIVE ATTENDANCE STOPPED")
+print("========================================")
