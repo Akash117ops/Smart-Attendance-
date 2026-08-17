@@ -1,4 +1,3 @@
-
 from flask import Flask, request
 from flask_cors import CORS
 from config import Config
@@ -374,6 +373,79 @@ def create_app():
                         "Temporary file cleanup failed:",
                         cleanup_error
                     )
+
+    # =====================================================
+    # DELETE STUDENT
+    #
+    # Removes the student row and any attendance records
+    # tied to them (so the FK constraint on Attendance
+    # doesn't block the delete), then commits to MySQL.
+    # =====================================================
+
+    @app.route(
+        "/api/students/<int:student_id>",
+        methods=["DELETE"]
+    )
+    def delete_student(student_id):
+
+        try:
+
+            student = Student.query.filter_by(
+                student_id=student_id
+            ).first()
+
+            if not student:
+
+                return {
+                    "success": False,
+                    "message": "Student not found."
+                }, 404
+
+            student_name = student.name
+            student_usn = student.usn
+
+            # -------------------------------------------------
+            # DELETE DEPENDENT ATTENDANCE RECORDS FIRST
+            # -------------------------------------------------
+
+            Attendance.query.filter_by(
+                student_id=student_id
+            ).delete()
+
+            # -------------------------------------------------
+            # DELETE STUDENT
+            # -------------------------------------------------
+
+            db.session.delete(student)
+
+            db.session.commit()
+
+            print(
+                f"STUDENT DELETED: {student_name} "
+                f"({student_usn}) id={student_id}"
+            )
+
+            return {
+                "success": True,
+                "message": (
+                    f"Student {student_name} deleted successfully."
+                ),
+                "student_id": student_id
+            }
+
+        except Exception as error:
+
+            db.session.rollback()
+
+            print(
+                "DELETE STUDENT ERROR:",
+                error
+            )
+
+            return {
+                "success": False,
+                "message": str(error)
+            }, 500
 
     # =====================================================
     # START ATTENDANCE SESSION
