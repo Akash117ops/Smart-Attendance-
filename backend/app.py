@@ -10,16 +10,44 @@ from models import (
     Faculty,
     AuditLog
 )
-from face_service import generate_student_embedding
-from recognition_service import recognize_face
 
-from datetime import datetime, date, time
+from face_service import generate_student_embedding
+from recognition_service import recognize_faces_in_frame
+
+from datetime import datetime, date, time, timedelta
 
 import os
 import tempfile
+import cv2
+import numpy as np
+
+
+# =========================================================
+# TIMEZONE
+#
+# detected_at is stored in UTC (datetime.utcnow()) in the
+# database, which is correct practice. We only convert to
+# IST (UTC+5:30) when FORMATTING it for API responses /
+# display. Never change what's stored in the DB.
+# =========================================================
+
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+
+def to_ist(utc_dt):
+    """
+    Convert a naive UTC datetime (as stored by
+    datetime.utcnow()) to IST for display purposes.
+    """
+
+    if utc_dt is None:
+        return None
+
+    return utc_dt + IST_OFFSET
 
 
 def create_app():
+
     app = Flask(__name__)
 
     # =====================================================
@@ -41,17 +69,26 @@ def create_app():
 
     @app.route("/")
     def home():
+
         return {
-            "project": "AI-Based Smart Attendance Management System",
-            "status": "Backend and database are connected",
-            "version": "1.0"
+            "project":
+                "AI-Based Smart Attendance Management System",
+
+            "status":
+                "Backend and database are connected",
+
+            "version":
+                "1.0"
         }
 
     # =====================================================
     # GET ALL STUDENTS
     # =====================================================
 
-    @app.route("/api/students", methods=["GET"])
+    @app.route(
+        "/api/students",
+        methods=["GET"]
+    )
     def get_students():
 
         try:
@@ -61,37 +98,62 @@ def create_app():
             ).all()
 
             return {
+
                 "students": [
+
                     {
-                        "student_id": student.student_id,
-                        "usn": student.usn,
-                        "name": student.name,
-                        "email": student.email,
-                        "status": student.status,
-                        "enrollment_date": (
-                            student.enrollment_date.isoformat()
-                            if student.enrollment_date
-                            else None
-                        )
+                        "student_id":
+                            student.student_id,
+
+                        "usn":
+                            student.usn,
+
+                        "name":
+                            student.name,
+
+                        "email":
+                            student.email,
+
+                        "status":
+                            student.status,
+
+                        "enrollment_date":
+                            (
+                                student.enrollment_date.isoformat()
+                                if student.enrollment_date
+                                else None
+                            )
                     }
+
                     for student in students
                 ]
             }
 
         except Exception as error:
 
-            print("GET STUDENTS ERROR:", error)
+            print(
+                "GET STUDENTS ERROR:",
+                error
+            )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
     # ENROLL STUDENT
     # =====================================================
 
-    @app.route("/api/students/enroll", methods=["POST"])
+    @app.route(
+        "/api/students/enroll",
+        methods=["POST"]
+    )
     def enroll_student():
 
         temp_files = []
@@ -99,7 +161,7 @@ def create_app():
         try:
 
             # -------------------------------------------------
-            # GET FORM DATA
+            # FORM DATA
             # -------------------------------------------------
 
             usn = request.form.get(
@@ -122,15 +184,23 @@ def create_app():
             # -------------------------------------------------
 
             if not usn:
+
                 return {
-                    "success": False,
-                    "message": "USN is required."
+                    "success":
+                        False,
+
+                    "message":
+                        "USN is required."
                 }, 400
 
             if not name:
+
                 return {
-                    "success": False,
-                    "message": "Student name is required."
+                    "success":
+                        False,
+
+                    "message":
+                        "Student name is required."
                 }, 400
 
             # -------------------------------------------------
@@ -144,10 +214,13 @@ def create_app():
             if existing_student:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         f"Student with USN {usn} already exists."
-                    )
+
                 }, 409
 
             # -------------------------------------------------
@@ -161,11 +234,16 @@ def create_app():
             if not uploaded_files:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "At least one face photo is required."
-                    )
+
                 }, 400
+
+            # Maximum 5 photos
 
             uploaded_files = uploaded_files[:5]
 
@@ -188,7 +266,9 @@ def create_app():
                 ):
                     continue
 
-                filename = uploaded_file.filename.lower()
+                filename = (
+                    uploaded_file.filename.lower()
+                )
 
                 if not filename.endswith(
                     allowed_extensions
@@ -217,11 +297,16 @@ def create_app():
             if len(temp_files) < 3:
 
                 return {
-                    "success": False,
-                    "message": (
-                        "At least 3 valid face photos "
-                        "are required."
-                    )
+
+                    "success":
+                        False,
+
+                    "message":
+                        (
+                            "At least 3 valid face photos "
+                            "are required."
+                        )
+
                 }, 400
 
             # -------------------------------------------------
@@ -232,11 +317,19 @@ def create_app():
             print("=" * 60)
             print("FACE ENROLLMENT")
             print("=" * 60)
-            print(f"USN: {usn}")
-            print(f"Name: {name}")
+
+            print(
+                f"USN: {usn}"
+            )
+
+            print(
+                f"Name: {name}"
+            )
+
             print(
                 f"Photos received: {len(temp_files)}"
             )
+
             print()
 
             embedding_bytes, processed_count = (
@@ -248,11 +341,16 @@ def create_app():
             if processed_count < 1:
 
                 return {
-                    "success": False,
-                    "message": (
-                        "No valid face embeddings "
-                        "could be generated."
-                    )
+
+                    "success":
+                        False,
+
+                    "message":
+                        (
+                            "No valid face embeddings "
+                            "could be generated."
+                        )
+
                 }, 400
 
             # -------------------------------------------------
@@ -260,14 +358,21 @@ def create_app():
             # -------------------------------------------------
 
             student = Student(
+
                 usn=usn,
+
                 name=name,
+
                 email=email,
+
                 face_embedding=embedding_bytes,
+
                 status="ACTIVE"
             )
 
-            db.session.add(student)
+            db.session.add(
+                student
+            )
 
             db.session.commit()
 
@@ -276,38 +381,50 @@ def create_app():
             # -------------------------------------------------
 
             print()
-            print("Enrollment successful!")
+            print(
+                "Enrollment successful!"
+            )
+
             print(
                 f"Student ID: {student.student_id}"
             )
+
             print(
                 f"USN: {student.usn}"
             )
+
             print(
                 f"Name: {student.name}"
             )
+
             print(
                 f"Photos processed: {processed_count}"
             )
+
             print(
                 "Embedding dimensions: 512"
             )
+
             print(
                 "Saved to MySQL: YES"
             )
-            print("=" * 60)
+
+            print(
+                "=" * 60
+            )
+
             print()
 
-            # -------------------------------------------------
-            # RESPONSE
-            # -------------------------------------------------
-
             return {
-                "success": True,
-                "message": (
-                    "Student enrolled successfully."
-                ),
+
+                "success":
+                    True,
+
+                "message":
+                    "Student enrolled successfully.",
+
                 "student": {
+
                     "student_id":
                         student.student_id,
 
@@ -323,17 +440,23 @@ def create_app():
                     "status":
                         student.status,
 
-                    "enrollment_date": (
-                        student.enrollment_date.isoformat()
-                        if student.enrollment_date
-                        else None
-                    )
+                    "enrollment_date":
+                        (
+                            student.enrollment_date.isoformat()
+                            if student.enrollment_date
+                            else None
+                        )
                 },
+
                 "embedding": {
-                    "dimensions": 512,
+
+                    "dimensions":
+                        512,
+
                     "photos_processed":
                         processed_count
                 }
+
             }, 201
 
         except Exception as error:
@@ -341,13 +464,24 @@ def create_app():
             db.session.rollback()
 
             print()
-            print("ENROLLMENT ERROR:")
-            print(error)
+            print(
+                "ENROLLMENT ERROR:"
+            )
+
+            print(
+                error
+            )
+
             print()
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
         finally:
@@ -363,6 +497,7 @@ def create_app():
                     if os.path.exists(
                         file_path
                     ):
+
                         os.remove(
                             file_path
                         )
@@ -376,10 +511,6 @@ def create_app():
 
     # =====================================================
     # DELETE STUDENT
-    #
-    # Removes the student row and any attendance records
-    # tied to them (so the FK constraint on Attendance
-    # doesn't block the delete), then commits to MySQL.
     # =====================================================
 
     @app.route(
@@ -397,15 +528,20 @@ def create_app():
             if not student:
 
                 return {
-                    "success": False,
-                    "message": "Student not found."
+
+                    "success":
+                        False,
+
+                    "message":
+                        "Student not found."
+
                 }, 404
 
             student_name = student.name
             student_usn = student.usn
 
             # -------------------------------------------------
-            # DELETE DEPENDENT ATTENDANCE RECORDS FIRST
+            # DELETE ATTENDANCE RECORDS
             # -------------------------------------------------
 
             Attendance.query.filter_by(
@@ -416,21 +552,32 @@ def create_app():
             # DELETE STUDENT
             # -------------------------------------------------
 
-            db.session.delete(student)
+            db.session.delete(
+                student
+            )
 
             db.session.commit()
 
             print(
-                f"STUDENT DELETED: {student_name} "
-                f"({student_usn}) id={student_id}"
+                f"STUDENT DELETED: "
+                f"{student_name} "
+                f"({student_usn}) "
+                f"id={student_id}"
             )
 
             return {
-                "success": True,
-                "message": (
-                    f"Student {student_name} deleted successfully."
-                ),
-                "student_id": student_id
+
+                "success":
+                    True,
+
+                "message":
+                    (
+                        f"Student {student_name} "
+                        f"deleted successfully."
+                    ),
+
+                "student_id":
+                    student_id
             }
 
         except Exception as error:
@@ -443,8 +590,13 @@ def create_app():
             )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
@@ -476,19 +628,25 @@ def create_app():
             if not classroom_id:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "Classroom ID is required."
-                    )
+
                 }, 400
 
             if not period_number:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "Period number is required."
-                    )
+
                 }, 400
 
             # -------------------------------------------------
@@ -502,10 +660,13 @@ def create_app():
             if not classroom:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "Classroom not found."
-                    )
+
                 }, 404
 
             today = date.today()
@@ -515,9 +676,16 @@ def create_app():
             # -------------------------------------------------
 
             existing = Session.query.filter_by(
-                classroom_id=classroom_id,
-                period_number=period_number,
-                date=today
+
+                classroom_id=
+                    classroom_id,
+
+                period_number=
+                    period_number,
+
+                date=
+                    today
+
             ).first()
 
             if existing:
@@ -527,11 +695,15 @@ def create_app():
                 db.session.commit()
 
                 return {
-                    "success": True,
-                    "message": (
-                        "Existing session activated."
-                    ),
+
+                    "success":
+                        True,
+
+                    "message":
+                        "Existing session activated.",
+
                     "session": {
+
                         "session_id":
                             existing.session_id,
 
@@ -550,20 +722,32 @@ def create_app():
                 }
 
             # -------------------------------------------------
-            # CREATE NEW SESSION
+            # CREATE SESSION
             # -------------------------------------------------
 
             new_session = Session(
-                classroom_id=classroom_id,
-                period_number=period_number,
-                date=today,
-                start_time=datetime.now().time(),
-                end_time=time(
-                    23,
-                    59,
-                    59
-                ),
-                status="ACTIVE"
+
+                classroom_id=
+                    classroom_id,
+
+                period_number=
+                    period_number,
+
+                date=
+                    today,
+
+                start_time=
+                    datetime.now().time(),
+
+                end_time=
+                    time(
+                        23,
+                        59,
+                        59
+                    ),
+
+                status=
+                    "ACTIVE"
             )
 
             db.session.add(
@@ -573,11 +757,15 @@ def create_app():
             db.session.commit()
 
             return {
-                "success": True,
-                "message": (
-                    "Attendance session started."
-                ),
+
+                "success":
+                    True,
+
+                "message":
+                    "Attendance session started.",
+
                 "session": {
+
                     "session_id":
                         new_session.session_id,
 
@@ -593,6 +781,7 @@ def create_app():
                     "status":
                         new_session.status
                 }
+
             }, 201
 
         except Exception as error:
@@ -605,8 +794,13 @@ def create_app():
             )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
@@ -628,10 +822,13 @@ def create_app():
             if not session:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "Session not found."
-                    )
+
                 }, 404
 
             session.status = "COMPLETED"
@@ -643,8 +840,13 @@ def create_app():
             db.session.commit()
 
             return {
-                "success": True,
-                "message": "Session stopped.",
+
+                "success":
+                    True,
+
+                "message":
+                    "Session stopped.",
+
                 "session_id":
                     session.session_id
             }
@@ -659,12 +861,17 @@ def create_app():
             )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
-    # RECOGNIZE FACE + MARK ATTENDANCE
+    # RECOGNIZE MULTIPLE FACES + MARK ATTENDANCE
     # =====================================================
 
     @app.route(
@@ -675,9 +882,9 @@ def create_app():
 
         try:
 
-            # -------------------------------------------------
+            # =================================================
             # SESSION ID
-            # -------------------------------------------------
+            # =================================================
 
             session_id = request.form.get(
                 "session_id"
@@ -686,134 +893,413 @@ def create_app():
             if not session_id:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "Session ID is required."
-                    )
+
                 }, 400
 
-            # -------------------------------------------------
+            # =================================================
             # ACTIVE SESSION
-            # -------------------------------------------------
+            # =================================================
 
             session = Session.query.filter_by(
-                session_id=session_id,
-                status="ACTIVE"
+
+                session_id=
+                    session_id,
+
+                status=
+                    "ACTIVE"
+
             ).first()
 
             if not session:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "Active session not found."
-                    )
+
                 }, 404
 
-            # -------------------------------------------------
+            # =================================================
             # IMAGE
-            # -------------------------------------------------
+            # =================================================
 
-            image = request.files.get(
+            image_file = request.files.get(
                 "image"
             )
 
-            if not image:
+            if not image_file:
 
                 return {
-                    "success": False,
-                    "message": (
+
+                    "success":
+                        False,
+
+                    "message":
                         "Camera image is required."
-                    )
+
                 }, 400
 
-            # -------------------------------------------------
-            # TEMP IMAGE
-            # -------------------------------------------------
+            # =================================================
+            # CONVERT UPLOADED IMAGE TO OPENCV IMAGE
+            # =================================================
 
-            temp_file = tempfile.NamedTemporaryFile(
-                delete=False,
-                suffix=".jpg"
-            )
+            image_bytes = image_file.read()
 
-            image.save(
-                temp_file.name
-            )
-
-            temp_file.close()
-
-            try:
-
-                # -------------------------------------------------
-                # GET ACTIVE STUDENTS
-                # -------------------------------------------------
-
-                students = Student.query.filter_by(
-                    status="ACTIVE"
-                ).all()
-
-                # -------------------------------------------------
-                # FACE RECOGNITION
-                # -------------------------------------------------
-
-                result = recognize_face(
-                    temp_file.name,
-                    students
-                )
-
-            finally:
-
-                if os.path.exists(
-                    temp_file.name
-                ):
-                    os.remove(
-                        temp_file.name
-                    )
-
-            # -------------------------------------------------
-            # UNKNOWN FACE
-            # -------------------------------------------------
-
-            if not result["matched"]:
+            if not image_bytes:
 
                 return {
-                    "success": True,
-                    "matched": False,
-                    "message": "Unknown face.",
-                    "distance":
-                        result["distance"]
+
+                    "success":
+                        False,
+
+                    "message":
+                        "Empty camera image."
+
+                }, 400
+
+            image_array = np.frombuffer(
+                image_bytes,
+                dtype=np.uint8
+            )
+
+            frame = cv2.imdecode(
+                image_array,
+                cv2.IMREAD_COLOR
+            )
+
+            if frame is None:
+
+                return {
+
+                    "success":
+                        False,
+
+                    "message":
+                        "Could not decode camera image."
+
+                }, 400
+
+            # =================================================
+            # GET ACTIVE STUDENTS
+            # =================================================
+
+            students = Student.query.filter_by(
+                status="ACTIVE"
+            ).all()
+
+            if not students:
+
+                return {
+
+                    "success":
+                        False,
+
+                    "message":
+                        "No active students are enrolled."
+
+                }, 400
+
+            # =================================================
+            # MULTI-FACE RECOGNITION
+            # =================================================
+
+            result = recognize_faces_in_frame(
+                frame,
+                students
+            )
+
+            # =================================================
+            # MINIMUM 3 FACES NOT REACHED
+            # =================================================
+
+            if not result.get(
+                "ready",
+                False
+            ):
+
+                return {
+
+                    "success":
+                        True,
+
+                    "ready":
+                        False,
+
+                    "face_count":
+                        result.get(
+                            "face_count",
+                            0
+                        ),
+
+                    "minimum_faces":
+                        result.get(
+                            "minimum_faces",
+                            3
+                        ),
+
+                    "message":
+                        result.get(
+                            "message",
+                            "Minimum faces not detected."
+                        ),
+
+                    "faces":
+                        []
                 }
 
-            # -------------------------------------------------
-            # MATCH FOUND
-            # -------------------------------------------------
+            # =================================================
+            # PROCESS EVERY DETECTED FACE
+            # =================================================
 
-            student = result["student"]
+            attendance_results = []
 
-            distance = result["distance"]
+            matched_count = 0
+            marked_count = 0
+            already_marked_count = 0
+            spoof_count = 0
+            unknown_count = 0
 
-            # -------------------------------------------------
-            # DUPLICATE CHECK
-            # -------------------------------------------------
+            for face in result.get(
+                "faces",
+                []
+            ):
 
-            existing_attendance = (
-                Attendance.query.filter_by(
+                # -------------------------------------------------
+                # SPOOF
+                # -------------------------------------------------
+
+                if face.get(
+                    "status"
+                ) == "SPOOF":
+
+                    spoof_count += 1
+
+                    attendance_results.append({
+
+                        "face_index":
+                            face.get(
+                                "face_index"
+                            ),
+
+                        "status":
+                            "SPOOF",
+
+                        "is_real":
+                            False,
+
+                        "antispoof_score":
+                            face.get(
+                                "antispoof_score"
+                            ),
+
+                        "matched":
+                            False
+                    })
+
+                    continue
+
+                # -------------------------------------------------
+                # UNKNOWN REAL FACE
+                # -------------------------------------------------
+
+                if not face.get(
+                    "matched",
+                    False
+                ):
+
+                    unknown_count += 1
+
+                    attendance_results.append({
+
+                        "face_index":
+                            face.get(
+                                "face_index"
+                            ),
+
+                        "status":
+                            "UNKNOWN",
+
+                        "is_real":
+                            face.get(
+                                "is_real",
+                                False
+                            ),
+
+                        "antispoof_score":
+                            face.get(
+                                "antispoof_score"
+                            ),
+
+                        "matched":
+                            False,
+
+                        "distance":
+                            face.get(
+                                "distance"
+                            )
+                    })
+
+                    continue
+
+                # -------------------------------------------------
+                # MATCHED STUDENT
+                # -------------------------------------------------
+
+                student = face.get(
+                    "student"
+                )
+
+                if not student:
+                    continue
+
+                matched_count += 1
+
+                distance = face.get(
+                    "distance"
+                )
+
+                # -------------------------------------------------
+                # DUPLICATE CHECK
+                # -------------------------------------------------
+
+                existing_attendance = (
+                    Attendance.query.filter_by(
+
+                        student_id=
+                            student.student_id,
+
+                        session_id=
+                            session.session_id
+
+                    ).first()
+                )
+
+                # -------------------------------------------------
+                # ALREADY MARKED
+                # -------------------------------------------------
+
+                if existing_attendance:
+
+                    already_marked_count += 1
+
+                    attendance_results.append({
+
+                        "face_index":
+                            face.get(
+                                "face_index"
+                            ),
+
+                        "status":
+                            "ALREADY_MARKED",
+
+                        "is_real":
+                            True,
+
+                        "antispoof_score":
+                            face.get(
+                                "antispoof_score"
+                            ),
+
+                        "matched":
+                            True,
+
+                        "student": {
+
+                            "student_id":
+                                student.student_id,
+
+                            "usn":
+                                student.usn,
+
+                            "name":
+                                student.name
+                        },
+
+                        "distance":
+                            distance
+                    })
+
+                    continue
+
+                # -------------------------------------------------
+                # MARK ATTENDANCE
+                # -------------------------------------------------
+
+                confidence = max(
+                    0,
+                    min(
+                        100,
+                        (1 - distance) * 100
+                    )
+                )
+
+                attendance = Attendance(
+
                     student_id=
                         student.student_id,
 
                     session_id=
-                        session.session_id
-                ).first()
-            )
+                        session.session_id,
 
-            if existing_attendance:
+                    detected_at=
+                        datetime.utcnow(),
 
-                return {
-                    "success": True,
-                    "matched": True,
-                    "already_marked": True,
+                    confidence=
+                        confidence,
+
+                    embedding_distance=
+                        distance,
+
+                    liveness_score=
+                        face.get(
+                            "antispoof_score"
+                        ),
+
+                    status=
+                        "PRESENT",
+
+                    marked_by=
+                        "SYSTEM"
+                )
+
+                db.session.add(
+                    attendance
+                )
+
+                marked_count += 1
+
+                attendance_results.append({
+
+                    "face_index":
+                        face.get(
+                            "face_index"
+                        ),
+
+                    "status":
+                        "MARKED",
+
+                    "is_real":
+                        True,
+
+                    "antispoof_score":
+                        face.get(
+                            "antispoof_score"
+                        ),
+
+                    "matched":
+                        True,
 
                     "student": {
+
                         "student_id":
                             student.student_id,
 
@@ -825,111 +1311,106 @@ def create_app():
                     },
 
                     "distance":
-                        distance
-                }
+                        distance,
 
-            # -------------------------------------------------
-            # MARK ATTENDANCE
-            # -------------------------------------------------
+                    "confidence":
+                        confidence
+                })
 
-            attendance = Attendance(
+                print(
+                    f"ATTENDANCE MARKED: "
+                    f"{student.name} "
+                    f"({student.usn}) "
+                    f"distance={distance:.4f} "
+                    f"confidence={confidence:.2f}%"
+                )
 
-                student_id=
-                    student.student_id,
-
-                session_id=
-                    session.session_id,
-
-                detected_at=
-                    datetime.utcnow(),
-
-                confidence=max(
-                    0,
-                    min(
-                        100,
-                        (1 - distance) * 100
-                    )
-                ),
-
-                embedding_distance=
-                    distance,
-
-                liveness_score=None,
-
-                status="PRESENT",
-
-                marked_by="SYSTEM"
-            )
-
-            db.session.add(
-                attendance
-            )
+            # =================================================
+            # COMMIT ALL ATTENDANCE RECORDS
+            # =================================================
 
             db.session.commit()
 
-            print(
-                f"ATTENDANCE MARKED: "
-                f"{student.name} "
-                f"({student.usn}) "
-                f"distance={distance:.4f}"
-            )
-
-            # -------------------------------------------------
+            # =================================================
             # RESPONSE
-            # -------------------------------------------------
+            # =================================================
 
             return {
 
-                "success": True,
+                "success":
+                    True,
 
-                "matched": True,
+                "ready":
+                    True,
 
-                "already_marked": False,
+                "face_count":
+                    result.get(
+                        "face_count",
+                        0
+                    ),
 
-                "student": {
+                "minimum_faces":
+                    result.get(
+                        "minimum_faces",
+                        3
+                    ),
 
-                    "student_id":
-                        student.student_id,
+                "matched_count":
+                    matched_count,
 
-                    "usn":
-                        student.usn,
+                "marked_count":
+                    marked_count,
 
-                    "name":
-                        student.name
-                },
+                "already_marked_count":
+                    already_marked_count,
 
-                "attendance": {
+                "unknown_count":
+                    unknown_count,
 
-                    "attendance_id":
-                        attendance.attendance_id,
+                "spoof_count":
+                    spoof_count,
 
-                    "confidence":
-                        attendance.confidence,
+                "message":
+                    "Classroom recognition completed.",
 
-                    "distance":
-                        attendance.embedding_distance,
-
-                    "detected_at":
-                        attendance.detected_at.isoformat()
-                }
+                "faces":
+                    attendance_results
             }
 
         except Exception as error:
 
             db.session.rollback()
 
+            print()
             print(
-                "RECOGNITION ERROR:",
+                "RECOGNITION ERROR:"
+            )
+
+            print(
                 error
             )
 
+            import traceback
+
+            traceback.print_exc()
+
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
     # GET ATTENDANCE RECORDS
+    #
+    # NOTE: detected_at is stored in UTC in the database
+    # (datetime.utcnow()). We convert to IST here, only
+    # for display, using to_ist(). The stored value in
+    # MySQL is never changed.
     # =====================================================
 
     @app.route(
@@ -966,8 +1447,11 @@ def create_app():
                             record.session_id,
 
                         "classroom": (
+
                             record.session.classroom.classroom_name
+
                             if record.session.classroom
+
                             else None
                         ),
 
@@ -975,10 +1459,14 @@ def create_app():
                             record.session.period_number,
 
                         "date":
-                            str(record.session.date),
+                            str(
+                                record.session.date
+                            ),
 
                         "time":
-                            record.detected_at.strftime(
+                            to_ist(
+                                record.detected_at
+                            ).strftime(
                                 "%I:%M:%S %p"
                             ),
 
@@ -1004,8 +1492,13 @@ def create_app():
             )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
@@ -1025,8 +1518,11 @@ def create_app():
             ).all()
 
             return {
+
                 "classrooms": [
+
                     {
+
                         "classroom_id":
                             classroom.classroom_id,
 
@@ -1055,8 +1551,13 @@ def create_app():
             )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
@@ -1077,8 +1578,11 @@ def create_app():
             ).all()
 
             return {
+
                 "sessions": [
+
                     {
+
                         "session_id":
                             session.session_id,
 
@@ -1086,8 +1590,11 @@ def create_app():
                             session.classroom_id,
 
                         "classroom_name": (
+
                             session.classroom.classroom_name
+
                             if session.classroom
+
                             else None
                         ),
 
@@ -1095,21 +1602,31 @@ def create_app():
                             session.period_number,
 
                         "date":
-                            str(session.date),
+                            str(
+                                session.date
+                            ),
 
-                        "start_time":
+                        "start_time": (
+
                             session.start_time.strftime(
                                 "%H:%M:%S"
                             )
-                            if session.start_time
-                            else None,
 
-                        "end_time":
+                            if session.start_time
+
+                            else None
+                        ),
+
+                        "end_time": (
+
                             session.end_time.strftime(
                                 "%H:%M:%S"
                             )
+
                             if session.end_time
-                            else None,
+
+                            else None
+                        ),
 
                         "status":
                             session.status
@@ -1127,8 +1644,13 @@ def create_app():
             )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
 
     # =====================================================
@@ -1150,12 +1672,13 @@ def create_app():
             today = date.today()
 
             today_attendance = (
-                Attendance.query.join(
-                    Session
-                ).filter(
+                Attendance.query
+                .join(Session)
+                .filter(
                     Session.date == today,
                     Attendance.status == "PRESENT"
-                ).count()
+                )
+                .count()
             )
 
             active_session = Session.query.filter_by(
@@ -1169,16 +1692,19 @@ def create_app():
             if total_students > 0:
 
                 attendance_rate = round(
+
                     (
                         today_attendance
                         / total_students
                     ) * 100,
+
                     1
                 )
 
             return {
 
-                "success": True,
+                "success":
+                    True,
 
                 "total_students":
                     total_students,
@@ -1190,7 +1716,9 @@ def create_app():
                     attendance_rate,
 
                 "active_session": (
+
                     {
+
                         "session_id":
                             active_session.session_id,
 
@@ -1198,8 +1726,11 @@ def create_app():
                             active_session.classroom_id,
 
                         "classroom_name": (
+
                             active_session.classroom.classroom_name
+
                             if active_session.classroom
+
                             else None
                         ),
 
@@ -1209,7 +1740,9 @@ def create_app():
                         "status":
                             active_session.status
                     }
+
                     if active_session
+
                     else None
                 )
             }
@@ -1222,9 +1755,18 @@ def create_app():
             )
 
             return {
-                "success": False,
-                "message": str(error)
+
+                "success":
+                    False,
+
+                "message":
+                    str(error)
+
             }, 500
+
+    # =====================================================
+    # RETURN APP
+    # =====================================================
 
     return app
 
