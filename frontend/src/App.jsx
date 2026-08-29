@@ -1861,7 +1861,359 @@ function StudentsView({
     </Card>
   );
 }
+// ============================================================
+// REPORTS VIEW — MONTHLY REPORTS
+// ============================================================
 
+function ReportsView() {
+
+  const [month, setMonth] = useState(
+    new Date().getMonth() + 1
+  );
+
+  const [year, setYear] = useState(
+    new Date().getFullYear()
+  );
+
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function loadReport() {
+
+    try {
+
+      setLoading(true);
+      setError('');
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/reports/monthly?month=${month}&year=${year}`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Server returned ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+
+      setReport(data);
+
+    } catch (error) {
+
+      console.error(
+        'Failed to load monthly report:',
+        error
+      );
+
+      setError(
+        'Unable to load monthly report.'
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+  }
+
+
+  useEffect(() => {
+
+    loadReport();
+
+  }, [month, year]);
+
+
+  return (
+
+    <Card style={{ marginBottom: 0 }}>
+
+      <div className="sa-toolbar">
+
+        <div>
+
+          <p className="sa-card-title">
+            Monthly attendance report
+          </p>
+
+          <p className="sa-card-desc">
+            Attendance summary for the selected month.
+          </p>
+
+        </div>
+
+
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center'
+          }}
+        >
+
+          <select
+            className="sa-input"
+            value={month}
+            onChange={(event) =>
+              setMonth(Number(event.target.value))
+            }
+            style={{ width: 130 }}
+          >
+
+            {[
+              'January',
+              'February',
+              'March',
+              'April',
+              'May',
+              'June',
+              'July',
+              'August',
+              'September',
+              'October',
+              'November',
+              'December'
+            ].map((name, index) => (
+
+              <option
+                key={index + 1}
+                value={index + 1}
+              >
+                {name}
+              </option>
+
+            ))}
+
+          </select>
+
+
+          <select
+            className="sa-input"
+            value={year}
+            onChange={(event) =>
+              setYear(Number(event.target.value))
+            }
+            style={{ width: 100 }}
+          >
+
+            <option value={2026}>
+              2026
+            </option>
+
+            <option value={2027}>
+              2027
+            </option>
+
+          </select>
+
+        </div>
+
+      </div>
+
+
+      {loading && (
+
+        <div
+          style={{
+            textAlign: 'center',
+            padding: 50,
+            color: 'var(--text-secondary)'
+          }}
+        >
+
+          <Loader2
+            size={25}
+            className="sa-spin"
+          />
+
+          <div style={{ marginTop: 10 }}>
+            Loading monthly report...
+          </div>
+
+        </div>
+
+      )}
+
+
+      {error && (
+
+        <div
+          style={{
+            padding: 20,
+            color: 'var(--error)'
+          }}
+        >
+          {error}
+        </div>
+
+      )}
+
+
+      {!loading && !error && report && (
+
+        <div>
+
+          {/* SUMMARY */}
+
+          <div className="sa-stats-grid">
+
+            <div className="sa-stat-card">
+
+              <div className="sa-stat-label">
+                Month
+              </div>
+
+              <div className="sa-stat-value">
+                {report.month || month}
+              </div>
+
+            </div>
+
+
+            <div className="sa-stat-card">
+
+              <div className="sa-stat-label">
+                Total Students
+              </div>
+
+              <div className="sa-stat-value">
+                {report.total_students ?? 0}
+              </div>
+
+            </div>
+
+
+            <div className="sa-stat-card">
+
+              <div className="sa-stat-label">
+                Total Attendance
+              </div>
+
+              <div className="sa-stat-value">
+                {report.total_attendance ?? 0}
+              </div>
+
+            </div>
+
+
+            <div className="sa-stat-card">
+
+              <div className="sa-stat-label">
+                Attendance Rate
+              </div>
+
+              <div className="sa-stat-value">
+                {report.attendance_rate ?? 0}%
+              </div>
+
+            </div>
+
+          </div>
+
+
+          {/* STUDENT REPORT */}
+
+          {Array.isArray(report.students) && (
+
+            <div className="sa-table-wrap">
+
+              <table className="sa-table">
+
+                <thead>
+
+                  <tr>
+                    <th>Student</th>
+                    <th>USN</th>
+                    <th>Present</th>
+                    <th>Total Sessions</th>
+                    <th>Attendance %</th>
+                  </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                  {report.students.map(
+                    (student, index) => (
+
+                      <tr key={
+                        student.student_id || index
+                      }>
+
+                        <td className="sa-cell-name">
+                          {student.name}
+                        </td>
+
+                        <td className="sa-cell-muted">
+                          {student.usn}
+                        </td>
+
+                        <td>
+                          {student.present ?? 0}
+                        </td>
+
+                        <td className="sa-cell-muted">
+                          {student.total_sessions ?? 0}
+                        </td>
+
+                        <td>
+
+                          <span className="sa-badge sa-badge-success">
+
+                            <span className="sa-badge-dot" />
+
+                            {student.attendance_percentage ??
+                              student.attendance_rate ??
+                              0}%
+
+                          </span>
+
+                        </td>
+
+                      </tr>
+
+                    )
+                  )}
+
+
+                  {report.students.length === 0 && (
+
+                    <tr>
+
+                      <td
+                        colSpan={5}
+                        style={{
+                          textAlign: 'center',
+                          padding: 35
+                        }}
+                        className="sa-cell-muted"
+                      >
+                        No attendance records found
+                        for this month.
+                      </td>
+
+                    </tr>
+
+                  )}
+
+                </tbody>
+
+              </table>
+
+            </div>
+
+          )}
+
+        </div>
+
+      )}
+
+    </Card>
+  );
+}
 /* =========================================================
    EMPTY VIEWS
 ========================================================= */
@@ -3285,17 +3637,28 @@ export default function SmartAttendanceDashboard() {
             />
           )}
 
-          {/* OTHER PAGES */}
+         {/* OTHER PAGES */}
 
-          {[
-            "classrooms",
-            "sessions",
-            "reports",
-          ].includes(activeNav) && (
-            <EmptyView
-              nav={activeNav}
-            />
-          )}
+{[
+  'attendance',
+  'classrooms',
+  'sessions'
+].includes(activeNav) && (
+
+  <EmptyView
+    nav={activeNav}
+  />
+
+)}
+
+
+{/* REPORTS */}
+
+{activeNav === 'reports' && (
+
+  <ReportsView />
+
+)}
         </main>
       </div>
 

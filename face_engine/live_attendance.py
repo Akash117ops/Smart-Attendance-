@@ -9,7 +9,12 @@ from deepface import DeepFace
 # =============================
 
 MATCH_THRESHOLD = 0.40
+PROCESS_EVEMATCH_THRESHOLD = 0.40
 PROCESS_EVERY_N_FRAMES = 10
+SESSION_ID = 1
+
+# Minimum number of REAL faces required
+MIN_REQUIRED_FACES = 3RY_N_FRAMES = 10
 SESSION_ID = 1
 
 # =============================
@@ -213,117 +218,157 @@ while True:
         # PROCESS EVERY DETECTED FACE
         # ==================================
 
-        for face_data in results:
+      # ==================================
+# PROCESS EVERY DETECTED FACE
+# ==================================
 
-            area = face_data["facial_area"]
+real_faces = []
 
-            x = area["x"]
-            y = area["y"]
-            w = area["w"]
-            h = area["h"]
+for face_data in results:
 
-            # Prevent invalid coordinates
+    area = face_data["facial_area"]
 
-            x = max(0, x)
-            y = max(0, y)
+    x = max(0, area["x"])
+    y = max(0, area["y"])
 
-            x2 = min(
-                frame.shape[1],
-                x + w
-            )
+    x2 = min(
+        frame.shape[1],
+        x + area["w"]
+    )
 
-            y2 = min(
-                frame.shape[0],
-                y + h
-            )
+    y2 = min(
+        frame.shape[0],
+        y + area["h"]
+    )
 
-            if x2 <= x or y2 <= y:
-                continue
+    if x2 <= x or y2 <= y:
+        continue
 
-            # ==================================
-            # ANTI-SPOOF RESULT
-            # ==================================
+    # ==================================
+    # ANTI-SPOOF RESULT
+    # ==================================
 
-            is_real = face_data.get(
-                "is_real",
-                False
-            )
+    is_real = face_data.get(
+        "is_real",
+        False
+    )
 
-            spoof_score = face_data.get(
-                "antispoof_score",
-                0.0
-            )
+    spoof_score = face_data.get(
+        "antispoof_score",
+        0.0
+    )
 
-            # ==================================
-            # SPOOF FACE
-            # ==================================
+    # ==================================
+    # SPOOF FACE
+    # ==================================
 
-            if not is_real:
+    if not is_real:
 
-                color = (0, 0, 255)
+        color = (0, 0, 255)
 
-                label = (
-                    f"SPOOF | {spoof_score:.3f}"
-                )
+        label = (
+            f"SPOOF | {spoof_score:.3f}"
+        )
 
-                cv2.rectangle(
-                    display_frame,
-                    (x, y),
-                    (x2, y2),
-                    color,
-                    3
-                )
+        cv2.rectangle(
+            display_frame,
+            (x, y),
+            (x2, y2),
+            color,
+            3
+        )
 
-                cv2.putText(
-                    display_frame,
-                    label,
-                    (x, max(30, y - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.65,
-                    color,
-                    2
-                )
+        cv2.putText(
+            display_frame,
+            label,
+            (x, max(30, y - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            color,
+            2
+        )
 
-                # IMPORTANT:
-                # DO NOT RUN FACE RECOGNITION
-                # DO NOT MARK ATTENDANCE
+        continue
 
-                continue
+    # ==================================
+    # REAL FACE
+    # ==================================
 
-            # ==================================
-            # REAL FACE
-            # ==================================
+    color = (0, 255, 0)
 
-            color = (0, 255, 0)
+    label = (
+        f"REAL | {spoof_score:.3f}"
+    )
 
-            label = (
-                f"REAL | {spoof_score:.3f}"
-            )
+    cv2.rectangle(
+        display_frame,
+        (x, y),
+        (x2, y2),
+        color,
+        3
+    )
 
-            cv2.rectangle(
-                display_frame,
-                (x, y),
-                (x2, y2),
-                color,
-                3
-            )
+    cv2.putText(
+        display_frame,
+        label,
+        (x, max(30, y - 10)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        color,
+        2
+    )
 
-            cv2.putText(
-                display_frame,
-                label,
-                (x, max(30, y - 10)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                color,
-                2
-            )
+    # Save REAL face for later recognition
+    real_faces.append({
+        "x": x,
+        "y": y,
+        "x2": x2,
+        "y2": y2
+    })
 
-            # ==================================
-            # RECOGNITION
-            # ==================================
 
-            if frame_count % PROCESS_EVERY_N_FRAMES != 0:
-                continue
+# ==================================
+# MINIMUM FACE REQUIREMENT
+# ==================================
+
+real_face_count = len(real_faces)
+
+if real_face_count < MIN_REQUIRED_FACES:
+
+    cv2.putText(
+        display_frame,
+        f"WAITING: {real_face_count}/{MIN_REQUIRED_FACES} REAL FACES",
+        (20, 145),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 165, 255),
+        2
+    )
+
+else:
+
+    cv2.putText(
+        display_frame,
+        f"ATTENDANCE ACTIVE: {real_face_count} REAL FACES",
+        (20, 145),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 0),
+        2
+    )
+
+    # ==================================
+    # RECOGNIZE ALL REAL FACES
+    # ==================================
+
+    if frame_count % PROCESS_EVERY_N_FRAMES == 0:
+
+        for face in real_faces:
+
+            x = face["x"]
+            y = face["y"]
+            x2 = face["x2"]
+            y2 = face["y2"]
 
             try:
 
@@ -417,13 +462,6 @@ while True:
                     (0, 0, 255),
                     2
                 )
-
-    except Exception as e:
-
-        print(
-            "Detection / anti-spoof error:",
-            e
-        )
 
     # ==================================
     # DISPLAY INFORMATION

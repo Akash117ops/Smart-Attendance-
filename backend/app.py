@@ -15,6 +15,7 @@ from face_service import generate_student_embedding
 from recognition_service import recognize_faces_in_frame
 
 from datetime import datetime, date, time, timedelta
+from sqlalchemy import func
 
 import os
 import tempfile
@@ -1495,6 +1496,278 @@ def create_app():
 
                 "success":
                     False,
+
+                "message":
+                    str(error)
+
+            }, 500
+
+
+    # =====================================================
+    # MONTHLY ATTENDANCE REPORT
+    # =====================================================
+
+    @app.route(
+        "/api/reports/monthly",
+        methods=["GET"]
+    )
+    def monthly_report():
+
+        try:
+
+            # -------------------------------------------------
+            # GET MONTH AND YEAR
+            # -------------------------------------------------
+
+            month = request.args.get("month", type=int)
+            year = request.args.get("year", type=int)
+
+            today = date.today()
+
+            if not month:
+                month = today.month
+
+            if not year:
+                year = today.year
+
+            # -------------------------------------------------
+            # VALIDATE MONTH
+            # -------------------------------------------------
+
+            if month < 1 or month > 12:
+
+                return {
+                    "success": False,
+                    "message": "Month must be between 1 and 12."
+                }, 400
+
+            # -------------------------------------------------
+            # VALIDATE YEAR
+            # -------------------------------------------------
+
+            if year < 2020 or year > 2100:
+
+                return {
+                    "success": False,
+                    "message": "Invalid year."
+                }, 400
+
+            # -------------------------------------------------
+            # GET ALL SESSIONS FOR SELECTED MONTH
+            # -------------------------------------------------
+
+            sessions = Session.query.filter(
+                func.extract(
+                    "month",
+                    Session.date
+                ) == month,
+
+                func.extract(
+                    "year",
+                    Session.date
+                ) == year
+            ).all()
+
+            total_sessions = len(sessions)
+
+            session_ids = [
+                session.session_id
+                for session in sessions
+            ]
+
+            # -------------------------------------------------
+            # GET ACTIVE STUDENTS
+            # -------------------------------------------------
+
+            students = Student.query.filter_by(
+                status="ACTIVE"
+            ).order_by(
+                Student.name.asc()
+            ).all()
+
+            total_students = len(students)
+
+            # -------------------------------------------------
+            # NO SESSIONS
+            # -------------------------------------------------
+
+            if total_sessions == 0:
+
+                return {
+
+                    "success": True,
+
+                    "report": {
+
+                        "month": month,
+                        "year": year,
+
+                        "total_students":
+                            total_students,
+
+                        "total_sessions":
+                            0,
+
+                        "total_attendance":
+                            0,
+
+                        "overall_attendance_rate":
+                            0,
+
+                        "students": []
+
+                    },
+
+                    "message":
+                        "No attendance sessions found for this month."
+
+                }
+
+            # -------------------------------------------------
+            # GET ATTENDANCE RECORDS
+            # -------------------------------------------------
+
+            attendance_records = []
+
+            if session_ids:
+
+                attendance_records = Attendance.query.filter(
+                    Attendance.session_id.in_(session_ids)
+                ).all()
+
+            # -------------------------------------------------
+            # TOTAL PRESENT RECORDS
+            # -------------------------------------------------
+
+            total_attendance = len(
+                attendance_records
+            )
+
+            # -------------------------------------------------
+            # BUILD STUDENT-WISE REPORT
+            # -------------------------------------------------
+
+            student_report = []
+
+            for student in students:
+
+                present_count = 0
+
+                for record in attendance_records:
+
+                    if (
+                        record.student_id
+                        == student.student_id
+                        and str(record.status).upper()
+                        == "PRESENT"
+                    ):
+
+                        present_count += 1
+
+                absent_count = (
+                    total_sessions
+                    - present_count
+                )
+
+                attendance_percentage = round(
+                    (
+                        present_count
+                        / total_sessions
+                    ) * 100,
+                    1
+                )
+
+                student_report.append({
+
+                    "student_id":
+                        student.student_id,
+
+                    "name":
+                        student.name,
+
+                    "usn":
+                        student.usn,
+
+                    "present":
+                        present_count,
+
+                    "absent":
+                        absent_count,
+
+                    "total_sessions":
+                        total_sessions,
+
+                    "attendance_percentage":
+                        attendance_percentage
+
+                })
+
+            # -------------------------------------------------
+            # OVERALL ATTENDANCE RATE
+            # -------------------------------------------------
+
+            possible_attendance = (
+                total_students
+                * total_sessions
+            )
+
+            overall_attendance_rate = 0
+
+            if possible_attendance > 0:
+
+                overall_attendance_rate = round(
+                    (
+                        total_attendance
+                        / possible_attendance
+                    ) * 100,
+                    1
+                )
+
+            # -------------------------------------------------
+            # RETURN REPORT
+            # -------------------------------------------------
+
+            return {
+
+                "success": True,
+
+                "report": {
+
+                    "month":
+                        month,
+
+                    "year":
+                        year,
+
+                    "total_students":
+                        total_students,
+
+                    "total_sessions":
+                        total_sessions,
+
+                    "total_attendance":
+                        total_attendance,
+
+                    "overall_attendance_rate":
+                        overall_attendance_rate,
+
+                    "students":
+                        student_report
+
+                }
+
+            }
+
+        except Exception as error:
+
+            print(
+                "MONTHLY REPORT ERROR:",
+                error
+            )
+
+            return {
+
+                "success": False,
 
                 "message":
                     str(error)
