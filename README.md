@@ -74,6 +74,4 @@ pip install -r requirements.txt
 ```
 These are standalone scripts used to prototype enrollment and live recognition outside the API — not required to run the app itself.
 
-## Status
 
-Active final-year project — core enrollment, live recognition, session tracking, and reporting are working; anti-spoofing and accuracy tuning are ongoing.
