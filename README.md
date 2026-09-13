@@ -51,6 +51,13 @@ frontend/           React dashboard — live camera panel, students, sessions, r
 | `/api/sessions` | GET | List sessions |
 | `/api/dashboard` | GET | Dashboard summary stats |
 
+## Prerequisites
+
+- Python 3.9+
+- Node.js 18+
+- MySQL 8+
+- A webcam (for live recognition)
+
 ## Setup
 
 **Backend**
@@ -58,7 +65,7 @@ frontend/           React dashboard — live camera panel, students, sessions, r
 cd backend
 pip install -r requirements.txt
 ```
-Create a `.env` file with `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, then run the Flask app.
+Create a `.env` file with `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, then run the Flask app. Keep `.env` out of version control — don't hardcode credentials in scripts.
 
 **Frontend**
 ```bash
@@ -72,6 +79,8 @@ npm run dev
 cd face_engine
 pip install -r requirements.txt
 ```
-These are standalone scripts used to prototype enrollment and live recognition outside the API — not required to run the app itself.
 
+## Status
 
+Active final-year project — core enrollment, live recognition, session tracking, and reporting, anti-spoofing and accuracy all are working fine 
+*Trying to implement this project on CCTV integration to make end to end attendance system
