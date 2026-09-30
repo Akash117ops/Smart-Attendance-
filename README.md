@@ -83,4 +83,4 @@ pip install -r requirements.txt
 ## Status
 
 Active final-year project — core enrollment, live recognition, session tracking, and reporting, anti-spoofing and accuracy all are working fine 
-*Trying to implement this project on CCTV integration to make end to end attendance system
+*Trying to implement this project on CCTV integration to make end to end attendance system as next step 
