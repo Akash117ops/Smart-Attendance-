@@ -4,7 +4,7 @@ An AI-powered attendance system that recognizes students' faces from a live clas
 
 ## How it works
 
-1. A student is **enrolled** with a few photos. Faces are detected (MTCNN) and converted into a 512-d embedding (FaceNet512 via DeepFace), which is stored against their profile.
+1. A student is enrolled with a few photos. Faces are detected (MTCNN) and converted into a 512-d embedding (FaceNet512 via DeepFace), which is stored against their profile.
 2. During a live **session**, the camera feed is scanned every few frames. Detected faces are checked for **liveness/anti-spoofing** to reject photos or screens.
 3. Each real face's embedding is compared (cosine distance) against enrolled students. A match below the distance threshold is marked **present**, timestamped, and logged with its confidence score.
 4. Faculty can start/stop sessions, view live recognition, and pull attendance and monthly reports from a dashboard which is specially  designed for Faculty members.
